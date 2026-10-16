@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Sketch &amp; Guess</title>
+  <meta name="description" content="Draw, guess and laugh with friends. A free multiplayer drawing game.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="bg-doodles" aria-hidden="true"></div>
+
+  <!-- Connection banner (shown while the socket is reconnecting) -->
+  <div id="netBanner" class="net-banner" role="status" hidden>Connection lost, reconnecting...</div>
+
+  <!-- Corner controls (home + lobby). The game screen has its own copies in the top bar. -->
+  <div class="corner-controls" id="cornerControls">
+    <button class="icon-btn js-mute" type="button" aria-label="Toggle sound">🔊</button>
+    <button class="icon-btn js-theme" type="button" aria-label="Toggle dark mode">🌙</button>
+  </div>
+
+  <!-- ================= HOME ================= -->
+  <main id="home" class="screen home">
+    <div id="inviteBanner" class="invite-banner card" hidden>
+      <div class="invite-text">
+        <span class="invite-emoji" aria-hidden="true">💌</span>
+        <div>
+          <div class="invite-title">You've been invited!</div>
+          <div class="invite-sub">Room <strong id="inviteCode"></strong> is waiting for you</div>
+        </div>
+      </div>
+      <button id="inviteJoinBtn" class="btn btn-primary btn-big" type="button">Join game</button>
+    </div>
+
+    <h1 class="logo" aria-label="Sketch and Guess">
+      <span class="logo-word">Sketch</span>
+      <span class="logo-amp">&amp;</span>
+      <span class="logo-word">Guess</span>
+    </h1>
+    <p class="tagline">Draw it. Guess it. Laugh about it.</p>
+
+    <div class="home-card card">
+      <section class="home-profile">
+        <label class="label" for="nameInput">Your name</label>
+        <input id="nameInput" class="input input-big" type="text" maxlength="16" autocomplete="nickname" placeholder="Enter a cool name" spellcheck="false">
+        <div class="label">Pick your buddy</div>
+        <div id="avatarGrid" class="avatar-grid" role="radiogroup" aria-label="Avatar"></div>
+      </section>
+
+      <section class="home-play">
+        <button id="quickBtn" class="btn btn-primary btn-big" type="button">⚡ Quick Play</button>
+        <button id="createBtn" class="btn btn-secondary btn-big" type="button">🔒 Create Private Room</button>
+        <div class="divider"><span>or join with a code</span></div>
+        <form id="joinForm" class="join-row" autocomplete="off">
+          <input id="codeInput" class="input code-input" type="text" maxlength="6" placeholder="ABC123" aria-label="Room code" spellcheck="false">
+          <button id="joinBtn" class="btn btn-accent" type="submit">Join</button>
+        </form>
+        <div id="meStats" class="me-stats"></div>
+        <nav class="home-links">
+          <a class="pill-link" href="/gallery">🖼️ Gallery</a>
+          <a class="pill-link" href="/leaderboard">🏆 Leaderboard</a>
+        </nav>
+      </section>
+    </div>
+  </main>
+
+  <!-- ================= LOBBY ================= -->
+  <main id="lobby" class="screen lobby" hidden>
+    <header class="lobby-head card">
+      <div>
+        <div class="label">Room code</div>
+        <div class="room-code" id="lobbyCode"></div>
+        <span id="lobbyBadge" class="chip"></span>
+      </div>
+      <div class="lobby-head-actions">
+        <button id="copyLinkBtn" class="btn btn-accent" type="button">🔗 Copy invite link</button>
+        <button id="lobbyLeaveBtn" class="btn btn-ghost" type="button">Leave</button>
+      </div>
+    </header>
+
+    <div class="lobby-grid">
+      <section class="card lobby-players">
+        <h2 class="card-title">Players <span id="lobbyCount" class="chip"></span></h2>
+        <ul id="lobbyPlayers" class="lobby-player-list"></ul>
+      </section>
+
+      <section class="card lobby-settings">
+        <h2 class="card-title">Settings</h2>
+        <p id="settingsNote" class="muted">Only the host can change these.</p>
+        <div class="settings-grid">
+          <label class="field">
+            <span class="label">Rounds</span>
+            <select id="setRounds" class="input"></select>
+          </label>
+          <label class="field">
+            <span class="label">Draw time</span>
+            <select id="setDrawTime" class="input"></select>
+          </label>
+          <label class="field">
+            <span class="label">Max players</span>
+            <select id="setMaxPlayers" class="input"></select>
+          </label>
+        </div>
+        <div class="field">
+          <span class="label">Word categories</span>
+          <div id="setCategories" class="chip-row"></div>
+        </div>
+        <div id="customWrap" class="field">
+          <label class="label" for="setCustomWords">Custom words (comma separated)</label>
+          <textarea id="setCustomWords" class="input" rows="3" maxlength="6000" placeholder="pizza, rocket ship, best friend"></textarea>
+        </div>
+        <div id="customCount" class="muted small"></div>
+        <div class="toggle-row">
+          <label class="toggle">
+            <input id="setCustomOnly" type="checkbox">
+            <span class="toggle-ui" aria-hidden="true"></span>
+            <span>Use only custom words</span>
+          </label>
+          <label class="toggle">
+            <input id="setHints" type="checkbox">
+            <span class="toggle-ui" aria-hidden="true"></span>
+            <span>Letter hints</span>
+          </label>
+        </div>
+      </section>
+    </div>
+
+    <div class="lobby-start">
+      <button id="startBtn" class="btn btn-primary btn-big" type="button">🎨 Start game</button>
+      <p id="lobbyHint" class="lobby-hint"></p>
+    </div>
+  </main>
+
+  <!-- ================= GAME ================= -->
+  <main id="game" class="screen game" data-tab="chat" hidden>
+    <header class="topbar card">
+      <div class="topbar-left">
+        <div id="roundLabel" class="round-label"></div>
+      </div>
+      <div id="wordArea" class="word-area" aria-live="polite"></div>
+      <div class="topbar-right">
+        <div id="timer" class="timer" aria-label="Time left">
+          <svg viewBox="0 0 44 44" aria-hidden="true">
+            <circle class="timer-track" cx="22" cy="22" r="19"></circle>
+            <circle id="timerRing" class="timer-ring" cx="22" cy="22" r="19"></circle>
+          </svg>
+          <span id="timerText" class="timer-text"></span>
+        </div>
+        <button class="icon-btn js-mute" type="button" aria-label="Toggle sound">🔊</button>
+        <button class="icon-btn js-theme" type="button" aria-label="Toggle dark mode">🌙</button>
+        <button id="gameLeaveBtn" class="icon-btn" type="button" aria-label="Leave game" title="Leave game">🚪</button>
+      </div>
+    </header>
+
+    <aside id="playersPanel" class="card panel players-panel">
+      <h2 class="card-title">Players</h2>
+      <ul id="playerList" class="player-list"></ul>
+    </aside>
+
+    <section class="stage">
+      <div id="boardWrap" class="board-wrap">
+        <canvas id="board" class="board" width="800" height="600" aria-label="Drawing board"></canvas>
+        <div id="fxLayer" class="fx-layer" aria-hidden="true"></div>
+
+        <div id="chooseOverlay" class="board-overlay" hidden>
+          <div class="overlay-card">
+            <div id="chooseTitle" class="overlay-title"></div>
+            <div id="chooseBody" class="choose-body"></div>
+            <div class="choose-timer">⏳ <span id="chooseTimer"></span>s</div>
+          </div>
+        </div>
+
+        <div id="revealOverlay" class="board-overlay" hidden>
+          <div class="overlay-card reveal-card">
+            <div id="revealReason" class="muted"></div>
+            <div class="overlay-title">The word was <span id="revealWord" class="reveal-word"></span></div>
+            <div class="reveal-body">
+              <ul id="revealDeltas" class="reveal-deltas"></ul>
+              <div class="reveal-replay">
+                <canvas id="revealCanvas" class="reveal-canvas" width="800" height="600"></canvas>
+                <button id="revealGifBtn" class="btn btn-small btn-accent" type="button">💾 Save GIF</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="toolbar" class="toolbar card" hidden>
+        <div id="palette" class="palette" role="radiogroup" aria-label="Colors"></div>
+        <div id="sizes" class="sizes" role="radiogroup" aria-label="Brush size"></div>
+        <div class="tools">
+          <button class="tool-btn" type="button" data-tool="brush" title="Brush" aria-label="Brush">🖌️</button>
+          <button class="tool-btn" type="button" data-tool="eraser" title="Eraser" aria-label="Eraser">🧽</button>
+          <button class="tool-btn" type="button" data-tool="fill" title="Fill" aria-label="Fill">🪣</button>
+          <button id="undoBtn" class="tool-btn" type="button" title="Undo (Ctrl+Z)" aria-label="Undo">↩️</button>
+          <button id="clearBtn" class="tool-btn" type="button" title="Clear" aria-label="Clear canvas">🗑️</button>
+        </div>
+      </div>
+
+      <div id="reactBar" class="react-bar" hidden>
+        <button id="reactUp" class="react-btn" type="button" aria-label="Like this drawing">👍</button>
+        <button id="reactDown" class="react-btn" type="button" aria-label="Dislike this drawing">👎</button>
+      </div>
+    </section>
+
+    <nav class="tabs" role="tablist">
+      <button id="tabChat" class="tab" type="button" role="tab" data-tab="chat">💬 Chat</button>
+      <button id="tabPlayers" class="tab" type="button" role="tab" data-tab="players">👥 Players</button>
+    </nav>
+
+    <aside id="chatPanel" class="card panel chat-panel">
+      <div id="chatLog" class="chat-log" aria-live="polite"></div>
+      <form id="chatForm" class="chat-form" autocomplete="off">
+        <input id="chatInput" class="input" type="text" maxlength="100" placeholder="Say something..." aria-label="Chat or guess">
+        <button id="chatSend" class="btn btn-primary" type="submit" aria-label="Send">➤</button>
+      </form>
+    </aside>
+  </main>
+
+  <!-- ================= GAME OVER ================= -->
+  <div id="gameover" class="modal-backdrop gameover" hidden>
+    <div class="gameover-inner">
+      <h2 class="gameover-title">🏁 Game over!</h2>
+      <div id="podium" class="podium"></div>
+
+      <div class="gameover-grid">
+        <section class="card">
+          <h3 class="card-title">Scoreboard</h3>
+          <ol id="scoreboard" class="scoreboard"></ol>
+        </section>
+        <section id="voteSection" class="card vote-section">
+          <h3 class="card-title">Vote for the best drawing <span id="voteTimer" class="chip"></span></h3>
+          <div id="voteGrid" class="vote-grid"></div>
+        </section>
+      </div>
+
+      <div class="gameover-actions">
+        <button id="againBtn" class="btn btn-primary btn-big" type="button">🔁 Play again</button>
+        <p id="waitHost" class="muted">Waiting for host...</p>
+        <button id="goHomeBtn" class="btn btn-ghost" type="button">🏠 Home</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= CONFIRM MODAL ================= -->
+  <div id="modal" class="modal-backdrop" hidden>
+    <div class="card modal-card" role="dialog" aria-modal="true" aria-labelledby="modalText">
+      <p id="modalText" class="modal-text"></p>
+      <div class="modal-actions">
+        <button id="modalCancel" class="btn btn-ghost" type="button">Cancel</button>
+        <button id="modalOk" class="btn btn-primary" type="button">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/vendor/gif/gif.js"></script>
+  <script src="/js/shared.js"></script>
+  <script src="/js/sound.js"></script>
+  <script src="/js/canvas.js"></script>
+  <script src="/js/confetti.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gallery &amp; Leaderboard · Sketch &amp; Guess</title>
+  <meta name="description" content="Best drawings and top players of Sketch & Guess.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/css/gallery.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="logo" href="/" aria-label="Sketch &amp; Guess home"><span class="logo-icon" aria-hidden="true">🎨</span><span class="logo-text">Sketch <em>&amp;</em> Guess</span></a>
+    <div class="topbar-actions">
+      <button type="button" id="themeToggle" class="icon-btn" aria-label="Toggle dark mode" title="Toggle dark mode">🌓</button>
+      <a class="btn btn-play" href="/">Play ▶</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button type="button" class="tab" role="tab" id="tab-gallery" data-tab="gallery" aria-controls="panel-gallery">🖼️ Gallery</button>
+      <button type="button" class="tab" role="tab" id="tab-leaderboard" data-tab="leaderboard" aria-controls="panel-leaderboard">🏆 Leaderboard</button>
+    </nav>
+
+    <!-- Gallery -->
+    <section id="panel-gallery" class="panel" role="tabpanel" aria-labelledby="tab-gallery" hidden>
+      <h1 class="panel-title">Hall of Fame</h1>
+      <p class="panel-sub">The drawings players voted best at the end of each game.</p>
+      <div id="galleryGrid" class="grid"></div>
+      <div id="galleryEmpty" class="empty" hidden>
+        <div class="empty-emoji" aria-hidden="true">🖍️</div>
+        <h2>No masterpieces yet!</h2>
+        <p>Finish a game and vote for the best drawing to hang it here.</p>
+        <a class="btn btn-play" href="/">Start drawing</a>
+      </div>
+      <p id="galleryError" class="error" hidden></p>
+      <div class="more-row">
+        <button type="button" id="loadMore" class="btn btn-ghost" hidden>Load more</button>
+      </div>
+    </section>
+
+    <!-- Leaderboard -->
+    <section id="panel-leaderboard" class="panel" role="tabpanel" aria-labelledby="tab-leaderboard" hidden>
+      <div id="myStats" class="card stats-card" aria-live="polite"></div>
+
+      <h1 class="panel-title">Leaderboard</h1>
+      <div class="controls">
+        <div class="segmented" role="group" aria-label="Scope">
+          <button type="button" class="seg" data-scope="global" aria-pressed="true">🌍 Global</button>
+          <button type="button" class="seg" data-scope="local" aria-pressed="false">🤝 Played with me</button>
+        </div>
+        <div class="chips" role="group" aria-label="Sort by">
+          <button type="button" class="chip" data-sort="points" aria-pressed="true">Points</button>
+          <button type="button" class="chip" data-sort="wins" aria-pressed="false">Wins</button>
+          <button type="button" class="chip" data-sort="best" aria-pressed="false">Best game</button>
+          <button type="button" class="chip" data-sort="streak" aria-pressed="false">Win streak</button>
+          <button type="button" class="chip" data-sort="daily" aria-pressed="false">Daily 🔥</button>
+        </div>
+      </div>
+
+      <div class="card table-card">
+        <div class="table-scroll">
+          <table class="board">
+            <thead>
+              <tr>
+                <th scope="col" class="c-rank">#</th>
+                <th scope="col" class="c-name">Player</th>
+                <th scope="col" data-col="points">Points</th>
+                <th scope="col" data-col="games" class="c-games">Games</th>
+                <th scope="col" data-col="wins">Wins</th>
+                <th scope="col" data-col="best">Best</th>
+                <th scope="col" data-col="streak">Streak</th>
+                <th scope="col" data-col="daily">Daily</th>
+              </tr>
+            </thead>
+            <tbody id="boardBody"></tbody>
+          </table>
+        </div>
+        <p id="boardEmpty" class="empty small" hidden></p>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="viewer" class="viewer" aria-labelledby="viewerWord">
+    <div class="viewer-head">
+      <h2 id="viewerWord" class="viewer-word"></h2>
+      <button type="button" id="viewerClose" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <div class="viewer-canvas"><canvas id="viewerCanvas"></canvas></div>
+    <div class="viewer-meta" id="viewerMeta"></div>
+    <div class="viewer-actions">
+      <button type="button" id="viewerReplay" class="btn btn-ghost">↻ Replay</button>
+      <button type="button" id="viewerGif" class="btn btn-play">⬇ Save GIF</button>
+    </div>
+  </dialog>
+
+  <script src="/vendor/gif/gif.js"></script>
+  <script src="/js/shared.js"></script>
+  <script src="/js/canvas.js"></script>
+  <script src="/js/gallery.js"></script>
+</body>
+</html>
