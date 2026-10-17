@@ -109,15 +109,18 @@ function createRanking(db) {
   }
 
   function getLeaderboard({ scope = 'global', playerId, sort = 'points', limit = 50 } = {}) {
-    const col = SORTS[sort] || SORTS.points;
+    const col = Object.hasOwn(SORTS, sort) ? SORTS[sort] : SORTS.points;
+    // Expired daily streaks sort as 0, matching what freshDaily() displays.
+    const order = sort === 'daily' ? 'CASE WHEN last_play_day >= @yday THEN daily_streak ELSE 0 END' : col;
+    const yday = prevUtcDay(utcDay());
     const n = Math.min(Math.max(limit | 0, 1), 100);
     // A stale daily streak (last played before yesterday) is shown as 0.
     const rows = scope === 'local' && playerId != null
       ? db.prepare(`SELECT * FROM rank_stats WHERE player_id IN (
             SELECT DISTINCT g2.player_id FROM rank_games g1 JOIN rank_games g2 ON g1.game_id = g2.game_id
-            WHERE g1.player_id = ?) OR player_id = ? ORDER BY ${col} DESC, total_points DESC LIMIT ?`)
-        .all(String(playerId), String(playerId), n)
-      : db.prepare(`SELECT * FROM rank_stats ORDER BY ${col} DESC, total_points DESC LIMIT ?`).all(n);
+            WHERE g1.player_id = @id) OR player_id = @id ORDER BY ${order} DESC, total_points DESC LIMIT @n`)
+        .all({ id: String(playerId), n, ...(sort === 'daily' && { yday }) })
+      : db.prepare(`SELECT * FROM rank_stats ORDER BY ${order} DESC, total_points DESC LIMIT @n`).all({ n, ...(sort === 'daily' && { yday }) });
     return rows.map(publicRow).map(freshDaily);
   }
 

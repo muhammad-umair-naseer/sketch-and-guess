@@ -151,7 +151,10 @@
 
     load(ops) {
       this.reset();
+      this._loading = true; // fills repaint once at the end instead of once each
       for (const op of ops || []) this.apply(op);
+      this._loading = false;
+      this.redraw();
     }
 
     apply(op) {
@@ -177,7 +180,9 @@
           const copy = clone(op);
           this._ops.push(copy);
           this._byId.set(copy.id, copy);
-          floodFill(this.ctx, copy.x, copy.y, copy.color);
+          // Fill on a full repaint, never on the incrementally drawn bitmap: chunking changes stroke
+          // edge pixels, so filling in place could leak on one client and stay contained on another.
+          if (!this._loading) this.redraw();
           break;
         }
         case 'undo': {

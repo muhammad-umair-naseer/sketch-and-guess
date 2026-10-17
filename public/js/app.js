@@ -130,6 +130,7 @@
   let leaving = false;       // ignore late 'state' packets after leaving a room
   let lastStateAt = 0;
   let lastTurnId = null;
+  let boardTurn = null;      // turn whose drawing the board currently holds
   let tickKey = null;
   let chooseKey = null;
   let knownIds = null;       // player ids seen last state (join sound)
@@ -158,7 +159,7 @@
   }
 
   socket.on('connect', () => { $('netBanner').hidden = true; syncClock(); });
-  socket.on('disconnect', () => { $('netBanner').hidden = false; });
+  socket.on('disconnect', (reason) => { $('netBanner').hidden = reason === 'io client disconnect'; });
 
   socket.on('session', ({ token, playerId }) => {
     memToken = token;
@@ -172,7 +173,12 @@
   });
 
   socket.on('state', (s) => { if (!leaving) render(s); });
-  socket.on('canvas:sync', ({ ops }) => board.load(Array.isArray(ops) ? ops : []));
+  socket.on('canvas:sync', ({ turnId, ops }) => {
+    // A reconnecting drawer keeps its own board: it already holds strokes the server hasn't processed yet.
+    if (canDraw() && turnId === boardTurn) return;
+    boardTurn = turnId;
+    board.load(Array.isArray(ops) ? ops : []);
+  });
   socket.on('draw', (op) => board.apply(op));
 
   socket.on('chat', (m) => {
@@ -214,7 +220,11 @@
   });
 
   socket.on('kicked', () => { toast('You were vote-kicked from the room.', 'error'); goHome(); });
-  socket.on('session:replaced', () => { toast('You opened the game in another tab.', 'error'); goHome(); });
+  socket.on('session:replaced', () => {
+    socket.disconnect(); // otherwise a later auto-reconnect silently takes the seat back from the other tab
+    toast('You opened the game in another tab.', 'error');
+    goHome();
+  });
 
   // ---------- screens ----------
   function showScreen(name) {
@@ -233,6 +243,7 @@
     cache.clear();
     fetchQ.length = 0;
     board.reset();
+    boardTurn = null;
     prevScores = new Map();
     knownIds = null;
     lastTurnId = null;
@@ -331,6 +342,7 @@
     const p = profile();
     if (!p) return;
     leaving = false;
+    if (!socket.connected) socket.connect(); // after session:replaced; the emit below is buffered
     homeButtons.forEach((b) => { b.disabled = true; });
     socket.emit(event, { ...p, ...extra }, (res) => {
       homeButtons.forEach((b) => { b.disabled = false; });
@@ -442,6 +454,8 @@
     setControl('setRounds', 'value', String(st.rounds), host);
     setControl('setDrawTime', 'value', String(st.drawTime), host);
     setControl('setMaxPlayers', 'value', String(st.maxPlayers), host);
+    // Same floor as the server's sanitizeSettings, so the host can't pick a value that gets ignored.
+    for (const o of $('setMaxPlayers').options) o.disabled = Number(o.value) < Math.max(Shared.MIN_PLAYERS, s.players.length);
     setControl('setCustomOnly', 'checked', st.customOnly, host);
     setControl('setHints', 'checked', st.hints, host);
     if (host && !wordsTimer) setControl('setCustomWords', 'value', (st.customWords || []).join(', '), true);
@@ -477,7 +491,7 @@
     const isDrawer = s.drawerId === myId;
 
     if (s.turnId !== lastTurnId) {
-      if (s.phase === 'choosing') board.reset();
+      if (s.phase === 'choosing') { board.reset(); boardTurn = s.turnId; }
       lastTurnId = s.turnId;
     }
     if (s.phase === 'drawing' && (!prev || prev.phase !== 'drawing' || prev.turnId !== s.turnId)) play('turn');

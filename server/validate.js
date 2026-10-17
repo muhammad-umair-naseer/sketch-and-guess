@@ -24,7 +24,7 @@ function rateLimiter(capacity, perSec) {
   };
 }
 
-/** Per-socket limiters, one bucket per event family. */
+/** Per-player limiters, one bucket per event family. */
 function makeLimits() {
   return {
     chat: rateLimiter(5, 1.5),

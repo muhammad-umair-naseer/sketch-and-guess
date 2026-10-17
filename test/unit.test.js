@@ -87,14 +87,16 @@ test('words: parseCustomWords filters invalid, duplicate and profane entries', (
 });
 
 test('profanity: flags bad tokens, not innocent words', () => {
-  for (const bad of ['fuck', 'you are a b1tch', 'SHIIIT', 'chutiya', 'motherfucker', 'f u c k off ass']) {
+  for (const bad of ['fuck', 'you are a b1tch', 'SHIIIT', 'chutiya', 'motherfucker', 'f u c k off ass', 'niggas', 'cunts', 'dicks', 'shithead', 'f u c k', 'fսck']) {
     assert.ok(isProfane(bad), bad);
   }
-  for (const ok of ['class', 'cucumber', 'kutta', 'assistant', 'grass', 'Scunthorpe', 'hello there']) {
+  for (const ok of ['class', 'cucumber', 'kutta', 'assistant', 'grass', 'Scunthorpe', 'hello there', 'Dickens', 'cocky', 'I am a b c d']) {
     assert.equal(isProfane(ok), false, ok);
   }
   assert.equal(censor('what the fuck  man'), 'what the ****  man');
   assert.equal(cleanName('shit'), null);
+  assert.equal(cleanName('niggas'), null);
+  assert.equal(censor('you f u c k off'), 'you * * * * off');
   assert.equal(cleanName('  Ali <b> '), 'Ali b');
 });
 
@@ -191,6 +193,22 @@ test('ranking', async (t) => {
     const local = ranking.getLeaderboard({ scope: 'local', playerId: 1, sort: 'wins' });
     assert.deepEqual(local.map((r) => r.playerId).sort(), ['1', '2']);
     assert.equal(ranking.getLeaderboard({ scope: 'local', playerId: 3 }).length, 2);
+  });
+
+  await t.test('unknown sort keys fall back to points', () => {
+    for (const sort of ['constructor', 'toString', '__proto__', 'bogus']) {
+      assert.equal(ranking.getLeaderboard({ sort })[0].playerId, '3', sort);
+    }
+  });
+
+  await t.test('daily sort ranks expired streaks as 0', () => {
+    game('g7', [[5, 1, 1], [6, 1, 2]]); // both have an active 1-day streak
+    db.prepare("UPDATE rank_stats SET daily_streak = 30, last_play_day = ? WHERE player_id = '4'").run(utcDay(Date.now() - 10 * DAY));
+    for (const scope of ['global', 'local']) {
+      const top = ranking.getLeaderboard({ scope, playerId: 4, sort: 'daily' });
+      assert.notEqual(top[0].playerId, '4', scope);
+      assert.equal(top.find((r) => r.playerId === '4').dailyStreak, 0);
+    }
   });
 
   await t.test('badges', () => {

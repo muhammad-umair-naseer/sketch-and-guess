@@ -86,8 +86,11 @@ function start({ port = process.env.PORT || 3000, dbPath = process.env.DB_PATH |
   }
   // ponytail: linear scans over rooms; add a playerId -> room index if rooms reach the thousands.
   const roomOf = (playerId) => [...rooms.values()].find((r) => r.players.has(playerId));
-  const openPublicRoom = () => [...rooms.values()].find((r) =>
-    r.isPublic && r.phase !== 'gameover' && r.players.size < r.settings.maxPlayers);
+  const openPublicRoom = (token) => [...rooms.values()].find((r) =>
+    r.isPublic && r.phase !== 'gameover' && r.players.size < r.settings.maxPlayers && !r.banned.has(token));
+  // Rate limits follow the player, not the socket, so reconnecting doesn't refill the buckets.
+  // ponytail: entries are never evicted; bounded by the number of players seen since boot.
+  const limitsByPlayer = new Map();
 
   // Every socket carries a session token (generated here if missing/invalid).
   io.use((socket, next) => {
@@ -96,7 +99,8 @@ function start({ port = process.env.PORT || 3000, dbPath = process.env.DB_PATH |
     const player = store.getOrCreatePlayer(token);
     socket.data.token = token;
     socket.data.playerId = player.id;
-    socket.data.limits = makeLimits();
+    if (!limitsByPlayer.has(player.id)) limitsByPlayer.set(player.id, makeLimits());
+    socket.data.limits = limitsByPlayer.get(player.id);
     next();
   });
 
@@ -137,7 +141,7 @@ function start({ port = process.env.PORT || 3000, dbPath = process.env.DB_PATH |
     });
     on('room:quick', 'action', (ack, profile) => {
       if (!cleanName(profile?.name)) return ack({ error: 'Please choose a different name (1–16 characters, keep it friendly).' });
-      enter(openPublicRoom() || createRoom(true), profile, ack);
+      enter(openPublicRoom(token) || createRoom(true), profile, ack);
     });
     on('room:join', 'action', (ack, data) => {
       const r = rooms.get(String(data?.code || '').toUpperCase());

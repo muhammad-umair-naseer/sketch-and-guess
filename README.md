@@ -13,7 +13,7 @@ The server is Node + Express 5 + Socket.IO 4 with SQLite (better-sqlite3). The c
 - **Guessing:** guesses are not case-sensitive. A guess one letter away gets a private "so close!" message. Players who have guessed chat in a secret channel that only other correct guessers and the drawer can see.
 - **Hints:** letters are revealed at 50% and 75% of the draw time. The last hidden letter is never revealed.
 - **Reactions and badges:** guessers can give the drawing a thumbs up or down. A well-liked drawing earns the drawer a Crowd Favorite badge.
-- **Vote-kick:** in rooms with 3 or more players, a player is kicked once a majority of the other connected players vote for it. A kicked player can't rejoin that room.
+- **Vote-kick:** in rooms with 3 or more players, a player is kicked once a majority of the other players in the room vote for it. A kicked player can't rejoin that room.
 - **Game over:** podium, confetti, final scores, and a 25-second vote for the Best Drawing of the game. The winner is saved to the public gallery.
 - **Gallery and leaderboard** (`/gallery`, `/leaderboard`): timelapse replays of past winners with GIF export, a global or "played with me" leaderboard with five ways to sort, and your own stats.
 - **Polish:** sounds synthesised with WebAudio (no audio files, with a mute toggle), light and dark themes, and a layout that works on phones.

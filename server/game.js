@@ -50,6 +50,7 @@ class Room {
     this.endsAt = null;
     this.drawings = [];
     this.usedWords = new Set();
+    this.drawn = new Set(); // drew this round; a leave + rejoin must not earn a second turn
     this.turnsPlayed = 0;
     this.results = null;
     this.voting = null;
@@ -75,7 +76,7 @@ class Room {
       this.players.set(p.id, p);
       if (this.hostId == null) this.hostId = p.id;
       // Joining mid-round: you get a turn this round too.
-      if (this.inTurn) this.queue.push(p.id);
+      if (this.inTurn && !this.drawn.has(p.id)) this.queue.push(p.id);
       this.system(`${p.name} joined the room`);
     } else if (p.socket && p.socket !== socket) {
       p.socket.emit('session:replaced');
@@ -188,10 +189,12 @@ class Room {
       this.round += 1;
       if (this.round > this.settings.rounds) return this.finishGame();
       this.queue = [...this.players.keys()];
+      this.drawn.clear();
     }
 
     const drawer = this.players.get(drawerId);
     this.drawerId = drawerId;
+    this.drawn.add(drawerId);
     this.turn = {
       id: ++this.turnSeq,
       choices: words.pickChoices(this.settings, this.usedWords),
@@ -208,6 +211,7 @@ class Room {
       drawerName: drawer.name,
       drawerAvatar: drawer.avatar
     };
+    this.turn.choices.forEach((c) => this.usedWords.add(c.word)); // offered once per game, picked or not
     this.phase = 'choosing';
     this.endsAt = Date.now() + CHOOSE_MS;
     this.later(CHOOSE_MS, () => this.chooseWord(drawerId, Math.floor(Math.random() * this.turn.choices.length)));
@@ -220,7 +224,6 @@ class Room {
     this.clearTimers();
     t.word = t.choices[index].word;
     t.difficulty = t.choices[index].difficulty;
-    this.usedWords.add(t.word);
 
     const ms = this.settings.drawTime * 1000;
     this.phase = 'drawing';
@@ -262,7 +265,9 @@ class Room {
     const drawer = this.players.get(this.drawerId);
     const guesserCount = [...this.players.values()].filter((p) => p.id !== this.drawerId && (p.connected || p.guessed)).length;
     if (drawer) {
-      const pts = drawerPoints({ correct: t.guessOrder.length, guessers: guesserCount, difficulty: t.difficulty });
+      // Correct guessers who left since still count, so "everyone guessed" compares the same people.
+      const gone = t.guessOrder.filter((id) => !this.players.has(id)).length;
+      const pts = drawerPoints({ correct: t.guessOrder.length, guessers: guesserCount + gone, difficulty: t.difficulty });
       drawer.score += pts;
       t.deltas.set(drawer.id, pts);
     }
@@ -413,7 +418,7 @@ class Room {
     if (votes.has(voter.id)) return;
     votes.add(voter.id);
     this.kickVotes.set(targetId, votes);
-    const eligible = this.connected().filter((p) => p.id !== targetId).length;
+    const eligible = this.players.size - 1; // all seats, so a reconnecting player can't shrink the majority
     const needed = Math.floor(eligible / 2) + 1;
     this.system(`${voter.name} voted to kick ${target.name} (${votes.size}/${needed})`);
     if (votes.size >= needed) {
@@ -476,7 +481,7 @@ class Room {
       round: this.round,
       settings: {
         ...this.settings,
-        customWords: isHost ? this.settings.customWords : [],
+        customWords: isHost && this.phase === 'lobby' ? this.settings.customWords : [], // a migrated host mid-game is a guesser
         customWordCount: this.settings.customWords.length
       },
       players: [...this.players.values()].map((p) => ({

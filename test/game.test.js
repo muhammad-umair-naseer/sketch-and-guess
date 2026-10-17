@@ -80,6 +80,7 @@ test('quick play puts players in the same public room', async () => {
   const r2 = await ask(b, 'room:quick', { name: 'Q2', avatar: 0 });
   assert.equal(r1.code, r2.code);
   assert.equal(srv.rooms.get(r1.code).isPublic, true);
+  for (const c of [a, b]) await ask(c, 'room:leave'); // close the room so later quick-play tests start clean
 });
 
 test('host settings are validated and host-only', async () => {
@@ -251,4 +252,79 @@ test('chat is rate limited', async () => {
   const acks = await Promise.all(Array.from({ length: 10 }, (_, i) => ask(A, 'chat', `msg ${i}`)));
   assert.ok(acks.some((r) => r.error === 'Slow down a little!'));
   assert.ok(acks.filter((r) => r.ok).length >= 5);
+});
+
+test('vote-kick majority counts seats in their grace window', async () => {
+  const { host: A, rest: [B, C] } = await roomWith(['G1', 'G2', 'G3']);
+  C.socket.disconnect(); // C is reconnecting: still seated
+  await waitFor(B, 'state', (s) => s.players.find((p) => p.id === C.playerId)?.connected === false);
+  await ask(B, 'kick', A.playerId);
+  await sync(A);
+  assert.equal(eventsOf(A, 'kicked').length, 0, 'one vote of three seats is not a majority');
+  assert.equal(A.state.hostId, A.playerId);
+});
+
+test('a host migrated mid-game does not receive the custom word list', async () => {
+  const { host: A, rest: [B, C], room } = await roomWith(['W1', 'W2', 'W3']);
+  await ask(A, 'room:settings', { customWords: 'aardvark,zeppelin,quokka', customOnly: true });
+  await ask(A, 'room:start');
+  A.socket.disconnect();
+  const s = await waitFor(B, 'state', (st) => st.hostId === B.playerId);
+  assert.equal(room.phase, 'choosing');
+  assert.deepEqual(s.settings.customWords, []);
+  assert.equal(s.settings.customWordCount, 3);
+  await sync(C);
+});
+
+test('reconnecting does not refill the chat rate limit', async () => {
+  const { rest: [B] } = await roomWith(['R1', 'R2']);
+  await Promise.all(Array.from({ length: 5 }, (_, i) => ask(B, 'chat', `m${i}`)));
+  B.socket.disconnect();
+  const B2 = await connect(B.token);
+  await waitFor(B2, 'state');
+  assert.deepEqual(await ask(B2, 'chat', 'flood'), { error: 'Slow down a little!' });
+});
+
+test('drawer only gets the everyone-guessed bonus if every remaining guesser guessed', async () => {
+  const { host: D, rest: [A, B], room } = await roomWith(['Dra', 'Gue', 'Ssr']);
+  await ask(D, 'room:settings', { customWords: 'zorblat,quizzle,flumphy', customOnly: true, hints: false });
+  await ask(D, 'room:start');
+  await waitFor(D, 'state', (s) => s.phase === 'choosing');
+  await ask(D, 'turn:choose', 0);
+  await waitFor(D, 'state', (s) => s.phase === 'drawing');
+  await ask(A, 'chat', room.turn.word);
+  await ask(A, 'room:leave');
+  room.endTurn('time');
+  const reveal = await waitFor(B, 'turn:reveal');
+  const pts = reveal.deltas.find((d) => d.id === D.playerId).delta;
+  assert.equal(pts, Math.round(25 * { easy: 1, medium: 1.2, hard: 1.5 }[room.turn.difficulty]), 'no +50 bonus');
+});
+
+test('quick play skips a public room that vote-kicked you', async () => {
+  const [a, b, c] = await Promise.all(['QK1', 'QK2', 'QK3'].map(player));
+  const { code } = await ask(a, 'room:quick', { name: 'QK1', avatar: 0 });
+  for (const x of [b, c]) assert.equal((await ask(x, 'room:quick', { name: x.name, avatar: 0 })).code, code);
+  await ask(a, 'kick', c.playerId);
+  await ask(b, 'kick', c.playerId);
+  await waitFor(c, 'kicked');
+  const res = await ask(c, 'room:quick', { name: 'QK3', avatar: 0 });
+  assert.equal(res.ok, true);
+  assert.notEqual(res.code, code);
+});
+
+test('leaving and rejoining mid-round does not give a second turn', async () => {
+  const { code, host: H, rest: [A], room } = await roomWith(['Hos', 'Abe', 'Bob']);
+  await ask(H, 'room:start');
+  await waitFor(H, 'state', (s) => s.phase === 'choosing' && s.drawerId === H.playerId);
+  await ask(H, 'room:leave');
+  await waitFor(A, 'state', (s) => s.drawerId === A.playerId);
+  await ask(H, 'room:join', { code, name: 'Hos', avatar: 1 });
+  assert.ok(!room.queue.includes(H.playerId), 'already drew this round');
+});
+
+test('every offered word counts as used for the rest of the game', async () => {
+  const { host: A, room } = await roomWith(['U1', 'U2']);
+  await ask(A, 'room:start');
+  await waitFor(A, 'state', (s) => s.phase === 'choosing');
+  for (const c of room.turn.choices) assert.ok(room.usedWords.has(c.word), c.word);
 });
