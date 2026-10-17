@@ -6,14 +6,14 @@ The server is Node + Express 5 + Socket.IO 4 with SQLite (better-sqlite3). The c
 
 ## Features
 
-- **Rooms:** Quick Play drops you into an open public room, or you can create a private room and share its 6-character code or `/room/CODE` invite link.
-- **Lobby settings (host only):** 2 to 6 rounds, 60/80/100/120 second draw time, 2 to 12 players, word categories (Tech, Everyday, Food, Animals, Roman Urdu), custom words with a "custom words only" option, and hints on or off.
+- **Two game modes:** Quick Play matches you with strangers and fills empty seats with bots; a private room is for friends with a code and your own rules. See [Game modes](#game-modes).
+- **Lobby settings (private rooms, host only):** 2 to 6 rounds, 60/80/100/120 second draw time, 2 to 12 players, word categories (Tech, Everyday, Food, Animals, Roman Urdu), custom words with a "custom words only" option, and hints on or off.
 - **Choosing a word:** the drawer gets 3 choices (easy, medium, hard) and has 10 seconds to pick, after which one is picked at random. A word is not offered twice in the same game while unused words remain.
 - **Drawing tools:** 20-colour palette, 4 brush sizes, eraser, flood fill, undo (also Ctrl/Cmd+Z) and clear. Strokes are smoothed.
 - **Guessing:** guesses are not case-sensitive. A guess one letter away gets a private "so close!" message. Players who have guessed chat in a secret channel that only other correct guessers and the drawer can see.
 - **Hints:** letters are revealed at 50% and 75% of the draw time. The last hidden letter is never revealed.
 - **Reactions and badges:** guessers can give the drawing a thumbs up or down. A well-liked drawing earns the drawer a Crowd Favorite badge.
-- **Vote-kick:** in rooms with 3 or more players, a player is kicked once a majority of the other players in the room vote for it. A kicked player can't rejoin that room.
+- **Vote-kick:** in rooms with 3 or more human players, a player is kicked once a majority of the other humans in the room vote for it. A kicked player can't rejoin that room. A bot is removed with a single vote.
 - **Game over:** podium, confetti, final scores, and a 25-second vote for the Best Drawing of the game. The winner is saved to the public gallery.
 - **Gallery and leaderboard** (`/gallery`, `/leaderboard`): timelapse replays of past winners with GIF export, a global or "played with me" leaderboard with five ways to sort, and your own stats.
 - **Polish:** sounds synthesised with WebAudio (no audio files, with a mute toggle), light and dark themes, and a layout that works on phones.
@@ -61,7 +61,8 @@ Open http://localhost:3000 in two browser windows (or on two devices) to play. A
 ├── .env.example            sample configuration
 ├── server/
 │   ├── index.js            Express app, security headers, HTTP API, Socket.IO handlers, room registry
-│   ├── game.js             Room class: lobby, turn loop, timers, guessing, scoring, vote-kick, best-drawing vote, per-player state
+│   ├── game.js             Room class: lobby, Quick Play auto start, turn loop, timers, guessing, scoring, vote-kick, best-drawing vote, per-player state
+│   ├── bots.js             Quick Play bots: names, skill, scheduled guesses and reactions
 │   ├── scoring.js          points for guessers and drawers
 │   ├── words.js            word picking, masks, guess normalisation, Levenshtein, custom word parsing
 │   ├── words.json          word bank by category and difficulty
@@ -88,15 +89,32 @@ Open http://localhost:3000 in two browser windows (or on two devices) to play. A
 
 `data/` (the database) and `node_modules/` are created at runtime and ignored by git.
 
+## Game modes
+
+| | Quick Play | Private room |
+| --- | --- | --- |
+| Who joins | anyone pressing **Quick Play**: you join the first open public room, or a new one is made | people with the code or invite link |
+| Settings | fixed: 3 rounds, 80 s, up to 8 players, Everyday/Food/Animals, hints on | chosen by the host |
+| Starting | automatic. With 2+ humans the game starts 10 s later. Alone, you wait 8 s, then bots fill the room to 4 players and the game starts 3 s after that | the host presses **Start** |
+| After the game | 12 s after the Best Drawing vote closes, everyone (bots too) goes back to the lobby and the next game starts automatically | the host presses **Play Again** |
+| Bots | yes, to fill empty seats | never |
+
+Bots in Quick Play:
+
+- They never draw, so a round is one turn per human. They only guess: each bot has a skill level, easy words and revealed hints make it more likely to get the word, and it may type a few unrelated wrong guesses first. Their guesses go through the same chat checks and scoring as everyone else's, and they can give a thumbs up.
+- A human joining a full quick room takes a bot's seat. When the last human leaves, the bots go too and the room is closed.
+- Bots are never saved to the database or the leaderboard. A quick game is ranked only if at least 2 humans finished it.
+- The timings live in the exported `QUICK` object in `server/game.js` (the tests shorten them).
+
 ## How to play
 
 1. Enter a name, pick an avatar, then choose **Quick Play**, **Create Room** or **Join** with a code.
-2. In a private room, the host adjusts the settings and presses **Start** once at least 2 players are in.
+2. In a private room, the host adjusts the settings and presses **Start** once at least 2 players are in. A Quick Play game starts by itself.
 3. Every player draws once per round. When it's your turn, pick one of the three words within 10 seconds.
 4. If you're drawing: draw the word. No letters or numbers! Chat is off for the drawer during the turn.
 5. If you're guessing: type guesses into the chat. A correct guess is never shown to the others. They only see that you got it.
 6. A turn ends when time runs out, when everyone has guessed, or when the drawer leaves. The word and everyone's points are then shown for 5 seconds.
-7. After the last round, vote for the best drawing (you can't vote for your own). The host can then take everyone back to the lobby for another game.
+7. After the last round, vote for the best drawing (you can't vote for your own). In a private room the host can then take everyone back to the lobby for another game. A quick room moves on to the next game by itself.
 
 ## Scoring
 
@@ -163,7 +181,7 @@ All points are calculated on the server. Clients never send scores.
 How it behaves:
 
 - `awardBadge` also takes optional `name` and `avatar` arguments: `awardBadge(playerId, badge, name, avatar)`. They are used to create the stats row if the player doesn't have one yet.
-- `recordGame` runs in a single transaction and can safely be called twice for the same game. The per-game rows are keyed on `(game_id, player_id)` and repeats are ignored. The game only calls it when a game ends with at least 2 players.
+- `recordGame` runs in a single transaction and can safely be called twice for the same game. The per-game rows are keyed on `(game_id, player_id)` and repeats are ignored. The game only calls it when a game ends with at least 2 human players, and never includes bots.
 - `limit` defaults to 50 and is clamped to 1 to 100. A daily streak whose last game was before yesterday (UTC) is reported as 0.
 - Rows come back in camelCase: `playerId, name, avatar, totalPoints, gamesPlayed, wins, bestGameScore, winStreak, bestWinStreak, dailyStreak, bestDailyStreak, lastPlayDay, badges`.
 

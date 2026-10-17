@@ -50,6 +50,11 @@
     return h('span', { class: `avatar ${cls}`, style: `background:${AVATAR_COLORS[n % AVATAR_COLORS.length]}` }, AVATARS[n]);
   }
 
+  // Bots have negative ids (never stored server side), so the id is a fallback if isBot is missing.
+  const isBot = (p) => Boolean(p && (p.isBot || p.id < 0));
+  const botTag = (p) => (isBot(p) ? h('span', { class: 'bot-tag', title: 'Bot' }, '🤖 BOT') : null);
+  const isQuick = (s) => (s.mode ? s.mode === 'quick' : Boolean(s.isPublic));
+
   const play = (name) => { try { window.Sound.play(name); } catch { /* audio unavailable */ } };
   const confetti = (opts) => { try { window.Confetti.burst(opts); } catch { /* optional effect */ } };
 
@@ -442,14 +447,30 @@
     const host = s.hostId === myId;
     const st = s.settings;
     $('lobbyCode').textContent = s.code;
-    $('lobbyBadge').textContent = s.isPublic ? '🌍 Public room' : '🔒 Private room';
+    const quick = isQuick(s);
+    $('lobbyBadge').textContent = quick ? '⚡ Quick Play' : '🔒 Private room';
+    $('lobbyBadge').classList.toggle('quick-badge', quick);
     $('lobbyCount').textContent = `${s.players.length} / ${st.maxPlayers}`;
 
     $('lobbyPlayers').replaceChildren(...s.players.map((p) => h('li', { class: `lobby-player${p.connected ? '' : ' offline'}` },
       avatar(p.avatar, 'lg'),
       h('span', { class: 'lobby-name' }, p.name),
-      p.id === s.hostId ? h('span', { class: 'crown', title: 'Host' }, '👑') : null,
+      botTag(p),
+      !quick && p.id === s.hostId ? h('span', { class: 'crown', title: 'Host' }, '👑') : null,
       p.id === myId ? h('span', { class: 'you-tag' }, 'you') : null)));
+
+    // Quick rooms: fixed rules, no Start button; the countdown text is updated in tick().
+    $('quickPanel').hidden = !quick;
+    $('settingsCard').hidden = quick;
+    if (quick) {
+      const cats = st.categories.map((c) => Shared.CATEGORIES[c] || c).join(', ');
+      $('quickRules').replaceChildren(...[`🔁 ${plural(st.rounds, 'round')}`, `⏱️ ${st.drawTime}s to draw`,
+        `👥 Up to ${st.maxPlayers}`, st.hints ? '💡 Letter hints' : null, `📚 ${cats}`]
+        .filter(Boolean).map((t) => h('span', { class: 'chip' }, t)));
+      $('startBtn').hidden = true;
+      $('lobbyHint').textContent = '🤖 Not enough people? Bots will hop in so you can play right away.';
+      return;
+    }
 
     setControl('setRounds', 'value', String(st.rounds), host);
     setControl('setDrawTime', 'value', String(st.drawTime), host);
@@ -581,7 +602,8 @@
 
   function renderPlayers(s) {
     const sorted = [...s.players].sort((a, b) => b.score - a.score);
-    const canKick = s.players.length >= 3;
+    // Majority vote-kicks count humans only; any human can remove a bot on their own.
+    const canKick = s.players.filter((p) => !isBot(p)).length >= 3;
     let rank = 0;
     const rows = sorted.map((p, i) => {
       if (i === 0 || p.score < sorted[i - 1].score) rank = i + 1;
@@ -596,11 +618,15 @@
           // Status icons share the score line so long names keep the full row width.
           h('div', { class: 'pmeta' },
             h('span', { class: 'pscore' }, `${p.score} pts`),
+            botTag(p),
             p.id === s.drawerId ? h('span', { title: 'Drawing' }, '✏️') : null,
             p.guessed ? h('span', { title: 'Guessed it' }, '✅') : null,
-            p.id === s.hostId ? h('span', { title: 'Host' }, '👑') : null,
+            !isQuick(s) && p.id === s.hostId ? h('span', { title: 'Host' }, '👑') : null,
             p.badges ? h('span', { class: 'badge', title: 'Crowd Favorite badges' }, `🏅×${p.badges}`) : null)),
-        canKick && p.id !== myId ? h('button', {
+        isBot(p) ? h('button', {
+          class: 'kick-btn bot-kick', type: 'button', title: `Remove ${p.name}`, 'aria-label': `Remove bot ${p.name}`,
+          onclick: () => confirmModal(`Remove ${p.name} from the game?`, 'Remove bot').then((ok) => { if (ok) socket.emit('kick', p.id, ackToast); })
+        }, 'Remove bot') : canKick && p.id !== myId ? h('button', {
           class: 'kick-btn', type: 'button', title: `Vote to kick ${p.name}`, 'aria-label': `Vote to kick ${p.name}`,
           onclick: () => confirmModal(`Vote to kick ${p.name}?`, 'Vote kick').then((ok) => { if (ok) socket.emit('kick', p.id, ackToast); })
         }, p.kickVotes ? `🥾 ${p.kickVotes}` : '🥾') : null);
@@ -806,7 +832,7 @@
       if (d.delta > 0) setTimeout(() => countUp(num, d.delta), 150 + i * 90);
       return h('li', { class: 'delta-row', style: `animation-delay:${i * 90}ms` },
         avatar(d.avatar, 'sm'),
-        h('span', { class: 'delta-name' }, d.name, d.id === r.drawerId ? ' ✏️' : ''),
+        h('span', { class: 'delta-name' }, d.name, d.id === r.drawerId ? ' ✏️' : '', botTag(d)),
         num);
     }));
     $('revealGifBtn').disabled = !ops.length;
@@ -865,6 +891,7 @@
       return h('div', { class: `podium-spot spot-${i + 1}`, style: `--d:${delays[i]}ms` },
         avatar(r.avatar, 'xl'),
         h('div', { class: 'podium-name' }, r.name),
+        botTag(r),
         h('div', { class: 'podium-score' }, `${r.score} pts`),
         h('div', { class: 'podium-block' }, MEDALS[r.placement] || `#${r.placement}`));
     }));
@@ -872,7 +899,7 @@
     $('scoreboard').replaceChildren(...g.results.map((r) => h('li', { class: `score-row${r.id === myId ? ' me' : ''}` },
       h('span', { class: 'rank' }, `#${r.placement}`),
       avatar(r.avatar, 'sm'),
-      h('span', { class: 'score-name' }, r.name),
+      h('span', { class: 'score-name' }, h('span', { class: 'score-name-text' }, r.name), botTag(r)),
       h('span', { class: 'score-pts' }, `${r.score} pts`))));
 
     $('voteSection').hidden = !g.drawings.length;
@@ -927,8 +954,10 @@
       goWinnerShown = g.winnerTurnId;
       confetti();
     }
-    $('againBtn').hidden = s.hostId !== myId;
-    $('waitHost').hidden = s.hostId === myId;
+    const quick = isQuick(s);
+    $('againBtn').hidden = quick || s.hostId !== myId;
+    $('waitHost').hidden = quick || s.hostId === myId;
+    $('nextGame').hidden = !quick;
   }
 
   $('againBtn').addEventListener('click', () => socket.emit('room:again', ackToast));
@@ -960,7 +989,19 @@
     if (p === 'gameover' && S.gameover) {
       const g = S.gameover;
       $('voteTimer').textContent = g.voteEndsAt ? `⏳ ${secsLeft(g.voteEndsAt)}s` : 'Voting closed';
+      if (isQuick(S)) $('nextGame').textContent = S.nextGameAt ? `⏭️ Next game in ${secsLeft(S.nextGameAt)}s` : '⏭️ Next game starts after voting';
     }
+    if (p === 'lobby' && isQuick(S)) $('quickCountdown').textContent = quickCountdown(S);
+  }
+
+  /** Lobby countdown: with a lone human the scheduled event is bots joining, otherwise the start. */
+  function quickCountdown(s) {
+    const humans = s.players.filter((p) => !isBot(p) && p.connected).length; // the server only counts connected humans
+    const bots = s.players.filter(isBot).length;
+    if (!s.autoStartAt) return humans < 2 && !bots ? '🔎 Looking for players...' : '⏳ Getting ready...';
+    const secs = secsLeft(s.autoStartAt);
+    if (humans < 2 && !bots) return secs ? `🤖 Bots join in ${secs}s` : '🤖 Bots are on their way!';
+    return secs ? `🚀 Starting in ${secs}s` : '🎨 Here we go!';
   }
   setInterval(tick, 200);
 

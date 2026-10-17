@@ -3,6 +3,7 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { io } = require('socket.io-client');
 const { start } = require('../server');
+const { QUICK } = require('../server/game');
 
 let srv;
 let url;
@@ -327,4 +328,177 @@ test('every offered word counts as used for the rest of the game', async () => {
   await ask(A, 'room:start');
   await waitFor(A, 'state', (s) => s.phase === 'choosing');
   for (const c of room.turn.choices) assert.ok(room.usedWords.has(c.word), c.word);
+});
+
+// ---------- Quick Play ----------
+
+/** Shorten quick-room timings and close leftover quick rooms (matchmaking would pick them). Returns a restore fn. */
+function fastQuick() {
+  const saved = { ...QUICK };
+  Object.assign(QUICK, { fillMs: 60, startMs: 120, botStartMs: 60, nextGameMs: 60 });
+  for (const r of [...srv.rooms.values()]) if (r.isPublic) r.destroy();
+  return () => Object.assign(QUICK, saved);
+}
+/** One human in a fresh quick room, waited on until bots joined and the first turn began. */
+async function soloQuick(name) {
+  const a = await player(name);
+  const { code } = await ask(a, 'room:quick', { name, avatar: 0 });
+  await waitFor(a, 'state', (s) => s.phase === 'choosing');
+  return { a, code, room: srv.rooms.get(code) };
+}
+
+test('quick play: a solo player gets bots after a wait, then the game starts itself', async (t) => {
+  t.after(fastQuick());
+  const a = await player('Solo');
+  const { code } = await ask(a, 'room:quick', { name: 'Solo', avatar: 0 });
+  const first = await waitFor(a, 'state');
+  assert.equal(first.mode, 'quick');
+  assert.equal(first.players.length, 1, 'bots wait for fillMs');
+  assert.ok(first.autoStartAt > first.serverNow);
+  const seated = await waitFor(a, 'state', (s) => s.players.length === QUICK.target);
+  const botsIn = seated.players.filter((p) => p.isBot);
+  assert.equal(botsIn.length, QUICK.target - 1);
+  assert.ok(botsIn.every((p) => p.id < 0 && p.connected));
+  assert.equal(seated.phase, 'lobby');
+  assert.ok(seated.autoStartAt, 'kickoff is scheduled once bots are in');
+  const s = await waitFor(a, 'state', (st) => st.phase === 'choosing');
+  assert.equal(s.drawerId, a.playerId);
+  assert.deepEqual(srv.rooms.get(code).queue, [], 'bots are never queued to draw');
+});
+
+test('quick play: bots never draw, no ranking with one human, and the room rolls into the next game', async (t) => {
+  t.after(fastQuick());
+  const { a, room } = await soloQuick('Loner');
+  const drawers = [];
+  while (room.phase === 'choosing') { drawers.push(room.drawerId); room.nextTurn(); }
+  assert.deepEqual(drawers, [a.playerId, a.playerId, a.playerId], 'one turn per round: every human draws once');
+  const over = await waitFor(a, 'state', (s) => s.phase === 'gameover');
+  assert.ok(over.gameover.results.some((r) => r.isBot));
+  assert.ok(over.nextGameAt, 'no drawings to vote on, so the next game is already scheduled');
+  assert.equal(room.ranking.getPlayerStats(a.playerId), null, '1 human + bots is not ranked');
+  const mark = a.log.length;
+  const lobby = await waitFor(a, 'state', (s) => s.phase === 'lobby', mark);
+  assert.equal(lobby.players.length, QUICK.target, 'bots stay seated');
+  assert.equal(lobby.nextGameAt, null);
+  await waitFor(a, 'state', (s) => s.phase === 'choosing', mark);
+});
+
+test('quick play: a bot guess scores through the normal path and can end the turn', async (t) => {
+  t.after(fastQuick());
+  const { a, room } = await soloQuick('Drawer');
+  room.settings.drawTime = 0.5; // bots guess between 25% and 90% of the draw time
+  for (const p of room.players.values()) if (p.isBot) p.skill = 2;
+  const mark = a.log.length;
+  await ask(a, 'turn:choose', 0);
+  const word = room.turn.word;
+  const reveal = await waitFor(a, 'turn:reveal', () => true, mark);
+  assert.equal(reveal.reason, 'all_guessed');
+  const botDeltas = reveal.deltas.filter((d) => d.isBot);
+  assert.equal(botDeltas.length, QUICK.target - 1);
+  assert.ok(botDeltas.every((d) => d.delta > 0));
+  assert.ok(reveal.deltas.find((d) => d.id === a.playerId).delta >= 125, 'drawer gets the everyone-guessed bonus');
+  const msgs = eventsOf(a, 'chat', mark).filter((m) => m.type === 'msg');
+  assert.ok(msgs.every((m) => m.text !== word), 'correct bot guesses are not echoed');
+  assert.ok(msgs.every((m) => m.text.length < 3 || !word.includes(m.text)), 'wrong guesses are unrelated words');
+});
+
+test('quick play: a human joining a full quick room takes a bot seat', async (t) => {
+  t.after(fastQuick());
+  const { a, code, room } = await soloQuick('First');
+  room.settings.maxPlayers = QUICK.target; // full of 1 human + bots
+  const b = await player('Second');
+  const res = await ask(b, 'room:quick', { name: 'Second', avatar: 0 });
+  assert.equal(res.code, code);
+  const s = await waitFor(a, 'state', (st) => st.players.some((p) => p.id === b.playerId));
+  assert.equal(s.players.length, QUICK.target);
+  assert.equal(s.players.filter((p) => p.isBot).length, QUICK.target - 2);
+  assert.ok(eventsOf(a, 'chat').some((m) => m.type === 'system' && /left to make room for Second/.test(m.text)));
+});
+
+test('quick play: start, settings and play again are server-controlled', async (t) => {
+  t.after(fastQuick());
+  const { a, room } = await soloQuick('Ctrl');
+  assert.deepEqual(await ask(a, 'room:start'), { error: 'Quick Play games start automatically.' });
+  room.toLobby();
+  room.clearTimers(); // hold it in the lobby
+  await ask(a, 'room:settings', { rounds: 5, drawTime: 120 });
+  await ask(a, 'room:again');
+  await sync(a);
+  assert.deepEqual([a.state.settings.rounds, a.state.settings.drawTime, a.state.phase], [3, 80, 'lobby']);
+});
+
+test('private rooms never get bots and still need the host to start', async (t) => {
+  t.after(fastQuick());
+  const a = await player('Priv');
+  const { code } = await ask(a, 'room:create', { name: 'Priv', avatar: 0 });
+  await new Promise((r) => setTimeout(r, QUICK.fillMs + QUICK.botStartMs + 50));
+  await sync(a);
+  assert.equal(a.state.mode, 'private');
+  assert.equal(a.state.autoStartAt, null);
+  assert.equal(srv.rooms.get(code).players.size, 1);
+  assert.equal(a.state.phase, 'lobby');
+  assert.deepEqual(await ask(a, 'room:start'), { error: 'You need at least 2 players.' });
+});
+
+test('quick play: a human removes a bot with a single vote', async (t) => {
+  t.after(fastQuick());
+  const { a, room } = await soloQuick('Kicker');
+  const bot = [...room.players.values()].find((p) => p.isBot);
+  const mark = a.log.length;
+  await ask(a, 'kick', bot.id);
+  const s = await waitFor(a, 'state', (st) => !st.players.some((p) => p.id === bot.id), mark);
+  assert.equal(s.players.length, QUICK.target - 1);
+  assert.equal(room.banned.size, 0, 'bots are not banned');
+});
+
+test('quick play: the last human leaving destroys the room and its timers', async (t) => {
+  t.after(fastQuick());
+  const { a, code, room } = await soloQuick('Leaver');
+  assert.ok(room.timers.length);
+  await ask(a, 'room:leave');
+  assert.ok(!srv.rooms.has(code));
+  assert.deepEqual(room.timers, []);
+  assert.ok(![...srv.rooms.values()].some((r) => r.isPublic), 'no quick room left behind');
+});
+
+test('bot decoys never share a word with the answer (no "hot dog" when the word is "dog")', () => {
+  const { decoys } = require('../server/bots');
+  const words = require('../server/words');
+  const categories = ['everyday', 'food', 'animals'];
+  const split = (w) => words.normalize(w).split(/[\s-]+/);
+  for (const c of categories) for (const d of words.DIFFICULTIES) for (const word of words.BANK[c]?.[d] || []) {
+    const parts = new Set(split(word));
+    for (const w of decoys({ turn: { word }, settings: { categories } }, 10)) {
+      assert.ok(!split(w).some((x) => parts.has(x)), `${w} leaks ${word}`);
+    }
+  }
+});
+
+test('quick play: bot likes alone never earn a Crowd Favorite badge', async (t) => {
+  t.after(fastQuick());
+  const { a, room } = await soloQuick('Liked');
+  await ask(a, 'turn:choose', 0);
+  room.clearTimers(); // no scheduled bot guesses
+  for (const p of room.players.values()) if (p.isBot) room.handleReaction(p, 'up');
+  const awarded = [];
+  room.ranking = { ...room.ranking, awardBadge: (...args) => awarded.push(args) };
+  room.endTurn('time');
+  room.clearTimers();
+  assert.deepEqual(awarded, []);
+  assert.equal(room.players.get(a.playerId).badges, 0);
+});
+
+test('quick play: humans are re-ranked among themselves when a bot wins', async (t) => {
+  t.after(fastQuick());
+  const { a, code, room } = await soloQuick('Ann');
+  const b = await player('Ben');
+  assert.equal((await ask(b, 'room:quick', { name: 'Ben', avatar: 0 })).code, code);
+  room.clearTimers();
+  for (const p of room.players.values()) p.score = p.isBot ? 300 : p.id === a.playerId ? 200 : 100;
+  let recorded;
+  room.ranking = { ...room.ranking, recordGame: (g) => { recorded = g; } };
+  room.finishGame();
+  room.clearTimers();
+  assert.deepEqual(recorded.players.map((p) => [p.playerId, p.placement]), [[a.playerId, 1], [b.playerId, 2]]);
+  assert.equal(room.results.find((r) => r.id === a.playerId).placement, room.results.filter((r) => r.isBot).length + 1, 'display keeps overall places (tied bots share 1st)');
 });

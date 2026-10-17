@@ -86,8 +86,10 @@ function start({ port = process.env.PORT || 3000, dbPath = process.env.DB_PATH |
   }
   // ponytail: linear scans over rooms; add a playerId -> room index if rooms reach the thousands.
   const roomOf = (playerId) => [...rooms.values()].find((r) => r.players.has(playerId));
+  // A full quick room still has space if a bot can give up its seat.
   const openPublicRoom = (token) => [...rooms.values()].find((r) =>
-    r.isPublic && r.phase !== 'gameover' && r.players.size < r.settings.maxPlayers && !r.banned.has(token));
+    r.isPublic && r.phase !== 'gameover' && !r.banned.has(token) &&
+    (r.players.size < r.settings.maxPlayers || [...r.players.values()].some((p) => p.isBot)));
   // Rate limits follow the player, not the socket, so reconnecting doesn't refill the buckets.
   // ponytail: entries are never evicted; bounded by the number of players seen since boot.
   const limitsByPlayer = new Map();

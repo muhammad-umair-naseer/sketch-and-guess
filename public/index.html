@@ -53,8 +53,14 @@
       </section>
 
       <section class="home-play">
-        <button id="quickBtn" class="btn btn-primary btn-big" type="button">⚡ Quick Play</button>
-        <button id="createBtn" class="btn btn-secondary btn-big" type="button">🔒 Create Private Room</button>
+        <button id="quickBtn" class="btn btn-primary btn-big mode-btn" type="button">
+          <span class="mode-icon" aria-hidden="true">⚡</span>
+          <span class="mode-text"><span class="mode-title">Quick Play</span><span class="mode-desc">Jump into a public game — bots fill empty seats</span></span>
+        </button>
+        <button id="createBtn" class="btn btn-secondary btn-big mode-btn" type="button">
+          <span class="mode-icon" aria-hidden="true">🔒</span>
+          <span class="mode-text"><span class="mode-title">Create Private Room</span><span class="mode-desc">Invite friends with a code — you pick the rules</span></span>
+        </button>
         <div class="divider"><span>or join with a code</span></div>
         <form id="joinForm" class="join-row" autocomplete="off">
           <input id="codeInput" class="input code-input" type="text" maxlength="6" placeholder="ABC123" aria-label="Room code" spellcheck="false">
@@ -89,7 +95,18 @@
         <ul id="lobbyPlayers" class="lobby-player-list"></ul>
       </section>
 
-      <section class="card lobby-settings">
+      <!-- Quick Play rooms: fixed rules and an automatic countdown instead of host settings. -->
+      <section id="quickPanel" class="card quick-panel" hidden>
+        <div class="finding" aria-hidden="true">
+          <span class="finding-dot">✏️</span><span class="finding-dot">🎨</span><span class="finding-dot">🖍️</span>
+        </div>
+        <h2 class="quick-title">Finding players<span class="dots" aria-hidden="true"></span></h2>
+        <div id="quickCountdown" class="quick-countdown" aria-live="polite"></div>
+        <p class="muted">Quick Play uses the standard rules:</p>
+        <div id="quickRules" class="chip-row quick-rules"></div>
+      </section>
+
+      <section id="settingsCard" class="card lobby-settings">
         <h2 class="card-title">Settings</h2>
         <p id="settingsNote" class="muted">Only the host can change these.</p>
         <div class="settings-grid">
@@ -242,6 +259,7 @@
       <div class="gameover-actions">
         <button id="againBtn" class="btn btn-primary btn-big" type="button">🔁 Play again</button>
         <p id="waitHost" class="muted">Waiting for host...</p>
+        <p id="nextGame" class="next-game" aria-live="polite" hidden></p>
         <button id="goHomeBtn" class="btn btn-ghost" type="button">🏠 Home</button>
       </div>
     </div>
